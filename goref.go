@@ -1,5 +1,7 @@
 package ref
 
+import "github.com/elliotchance/orderedmap/v2"
+
 type Ref[T any] struct {
 	value T
 
@@ -7,13 +9,13 @@ type Ref[T any] struct {
 	// same effect more than once.
 	//
 	// The value is empty struct so the value don't occupy memory
-	effectsSubscribedTo map[*func()]struct{}
+	effectsSubscribedTo *orderedmap.OrderedMap[*func(), struct{}]
 }
 
 func NewRef[T any](initialValue T) Ref[T] {
 	return Ref[T]{
 		value:               initialValue,
-		effectsSubscribedTo: map[*func()]struct{}{},
+		effectsSubscribedTo: orderedmap.NewOrderedMap[*func(), struct{}](),
 	}
 }
 
@@ -26,8 +28,8 @@ func (r *Ref[T]) SetValue(value T) {
 	r.value = value
 
 	var f func()
-	for k := range r.effectsSubscribedTo {
-		f = *k
+	for el := r.effectsSubscribedTo.Front(); el != nil; el = el.Next() {
+		f = *el.Key
 		f()
 	}
 }
@@ -42,7 +44,7 @@ func Watch[T any](f func(), deps ...Ref[T]) func() {
 		return func() {}
 	}
 	for _, d := range deps {
-		d.effectsSubscribedTo[&f] = struct{}{}
+		d.effectsSubscribedTo.Set(&f, struct{}{})
 	}
 	f()
 	alreadyCanceled := false
@@ -52,7 +54,7 @@ func Watch[T any](f func(), deps ...Ref[T]) func() {
 		}
 		alreadyCanceled = true
 		for _, d := range deps {
-			delete(d.effectsSubscribedTo, &f)
+			d.effectsSubscribedTo.Delete(&f)
 		}
 	}
 }
