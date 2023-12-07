@@ -1,6 +1,7 @@
 package ref
 
 import (
+	"context"
 	"testing"
 )
 
@@ -41,12 +42,15 @@ func TestWatch(t *testing.T) {
 	countExecutionsWatch := 0
 	testRef := NewRef(struct{}{})
 
-	Watch(func() {
+	_, ready := Watch(func(prevValues []struct{}, ctx context.Context) {
 		countExecutionsWatch++
 	}, testRef)
+	<-ready
 
 	for i := 0; i < maxExecutions; i++ {
+
 		testRef.SetValue(struct{}{})
+		<-ready
 	}
 
 	// plus-one because the Watch function executes f before returning
@@ -62,15 +66,17 @@ func TestWatch(t *testing.T) {
 
 		testRef := NewRef(struct{}{})
 
-		cancel := Watch(func() {
+		cancel, ready := Watch(func(prevValues []struct{}, ctx context.Context) {
 			countExecutionsWatch++
 		}, testRef)
+		<-ready
 
 		for i := 0; i < maxExecutions; i++ {
 			if i >= setUntil {
 				cancel()
 			}
 			testRef.SetValue(struct{}{})
+			<-ready
 		}
 
 		if countExecutionsWatch != setUntil+1 {
