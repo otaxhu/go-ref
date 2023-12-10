@@ -36,14 +36,14 @@ func TestRef(t *testing.T) {
 	}
 }
 
-func TestWatch(t *testing.T) {
+func TestWatchImmediate(t *testing.T) {
 	t.Parallel()
 	const maxExecutions = 100
 	countExecutionsWatch := 0
 	testRef := NewRef(struct{}{})
 	readyCh := make(chan struct{})
 
-	Watch(func(actualValues, prevValues []struct{}, ctx context.Context) {
+	WatchImmediate(func(actualValues, prevValues []struct{}, ctx context.Context) {
 		countExecutionsWatch++
 		readyCh <- struct{}{}
 	}, testRef)
@@ -54,7 +54,7 @@ func TestWatch(t *testing.T) {
 	}
 	<-readyCh
 
-	// plus-one because the Watch function executes f before returning
+	// plus-one because WatchImmediate executes the watcher before returning
 	if countExecutionsWatch != maxExecutions+1 {
 		t.Errorf("unexpected count value, expected %d got %d", maxExecutions+1, countExecutionsWatch)
 		return
@@ -70,7 +70,7 @@ func TestWatch(t *testing.T) {
 		readyCh := make(chan struct{})
 		var chAlreadyClosed bool
 
-		cancel := Watch(func(actualValues, prevValues []struct{}, ctx context.Context) {
+		cancel := WatchImmediate(func(actualValues, prevValues []struct{}, ctx context.Context) {
 			countExecutionsWatch++
 			if !chAlreadyClosed {
 				readyCh <- struct{}{}
@@ -92,6 +92,64 @@ func TestWatch(t *testing.T) {
 
 		if countExecutionsWatch != setUntil+1 {
 			t.Errorf("unexpected count value, expected %d got %d", setUntil+1, countExecutionsWatch)
+			return
+		}
+	})
+}
+
+func TestWatch(t *testing.T) {
+	t.Parallel()
+	const maxExecutions = 100
+	countExecutionsWatch := 0
+	testRef := NewRef(struct{}{})
+	readyCh := make(chan struct{})
+
+	Watch(func(actualValues, prevValues []struct{}, ctx context.Context) {
+		countExecutionsWatch++
+		readyCh <- struct{}{}
+	}, testRef)
+
+	for i := 0; i < maxExecutions; i++ {
+		testRef.SetValue(struct{}{})
+		<-readyCh
+	}
+
+	if countExecutionsWatch != maxExecutions {
+		t.Errorf("unexpected count value, expected %d got %d", maxExecutions+1, countExecutionsWatch)
+		return
+	}
+
+	t.Run("CancelFunc", func(t *testing.T) {
+
+		const setUntil = 50
+		countExecutionsWatch = 0
+
+		testRef := NewRef(struct{}{})
+
+		readyCh := make(chan struct{})
+		var chAlreadyClosed bool
+
+		cancel := Watch(func(actualValues, prevValues []struct{}, ctx context.Context) {
+			countExecutionsWatch++
+			if !chAlreadyClosed {
+				readyCh <- struct{}{}
+			}
+		}, testRef)
+
+		for i := 0; i < maxExecutions; i++ {
+			if i >= setUntil {
+				cancel()
+				if !chAlreadyClosed {
+					close(readyCh)
+					chAlreadyClosed = true
+				}
+			}
+			testRef.SetValue(struct{}{})
+			<-readyCh
+		}
+
+		if countExecutionsWatch != setUntil {
+			t.Errorf("unexpected count value, expected %d got %d", setUntil, countExecutionsWatch)
 			return
 		}
 	})
