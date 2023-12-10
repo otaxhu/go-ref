@@ -85,7 +85,20 @@ func (r *Ref[T]) SetValue(value T) {
 
 type WatcherFunc[T any] func(actualValues, prevValues []T, ctx context.Context)
 
-// Watch executes the watcher every time its dependencies are updated,
+// Watch executes the watcher only when its dependendencies are updated, unlike WatchImmediate
+// which executes as soon as the function is called. This behaviour is useful for example if you
+// don't know what is going to be the value of the Ref at the moment the watcher is binded
+// so you can in another place determine the value of the Ref
+//
+// Watch returns a stop function to stop tracking the Refs deps. If a call to stop was already
+// made, next calls will be no-op.
+//
+// See WatchImmediate docs for more information about restrictions with the usage of WatcherFunc
+func Watch[T any](watcher WatcherFunc[T], deps ...*Ref[T]) (stopFunc func()) {
+	return watch(watcher, deps, watchLazy)
+}
+
+// WatchImmediate executes the watcher every time its dependencies are updated,
 // the watcher always executes at least once and in its own goroutine. actualValues is a
 // slice with lenght len(deps) and will always contain the actual values of the
 // dependencies. The first time the watcher function is executed prevValues is nil
@@ -94,7 +107,7 @@ type WatcherFunc[T any] func(actualValues, prevValues []T, ctx context.Context)
 // of the dependecies (previous value of the dependency updated, the rest of them will be
 // the actual values, same as actualValues values)
 //
-// Watch returns a stop function to stop tracking the Refs deps. If a call to stop was
+// WatchImmediate returns a stop function to stop tracking the Refs deps. If a call to stop was
 // already made, next calls will be no-op.
 //
 // IMPORTANT:
@@ -104,7 +117,18 @@ type WatcherFunc[T any] func(actualValues, prevValues []T, ctx context.Context)
 // the watcher. You should use the actualValues and prevValues slices if you want to access
 // the values. However, you can call those methods on a ref that is not a dependency of the
 // watcher
-func Watch[T any](watcher WatcherFunc[T], deps ...*Ref[T]) (stopFunc func()) {
+func WatchImmediate[T any](watcher WatcherFunc[T], deps ...*Ref[T]) (stopFunc func()) {
+	return watch(watcher, deps, watchImmediate)
+}
+
+type typeWatch int
+
+const (
+	watchImmediate typeWatch = iota
+	watchLazy
+)
+
+func watch[T any](watcher WatcherFunc[T], deps []*Ref[T], typeWatch typeWatch) func() {
 	noDuplicates := map[*Ref[T]]struct{}{}
 	for _, d := range deps {
 		noDuplicates[d] = struct{}{}
@@ -126,7 +150,9 @@ func Watch[T any](watcher WatcherFunc[T], deps ...*Ref[T]) (stopFunc func()) {
 		d.ctxSuscribedTo[&watcher] = ctx
 	}
 
-	go watcher(actualValues, nil, ctx)
+	if typeWatch == watchImmediate {
+		go watcher(actualValues, nil, ctx)
+	}
 
 	return sync.OnceFunc(func() {
 		for _, d := range deps {
