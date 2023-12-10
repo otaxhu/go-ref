@@ -41,17 +41,18 @@ func TestWatch(t *testing.T) {
 	const maxExecutions = 100
 	countExecutionsWatch := 0
 	testRef := NewRef(struct{}{})
+	readyCh := make(chan struct{})
 
-	_, ready := Watch(func(prevValues []struct{}, ctx context.Context) {
+	Watch(func(actualValues, prevValues []struct{}, ctx context.Context) {
 		countExecutionsWatch++
+		readyCh <- struct{}{}
 	}, testRef)
-	<-ready
 
 	for i := 0; i < maxExecutions; i++ {
-
+		<-readyCh
 		testRef.SetValue(struct{}{})
-		<-ready
 	}
+	<-readyCh
 
 	// plus-one because the Watch function executes f before returning
 	if countExecutionsWatch != maxExecutions+1 {
@@ -66,17 +67,27 @@ func TestWatch(t *testing.T) {
 
 		testRef := NewRef(struct{}{})
 
-		cancel, ready := Watch(func(prevValues []struct{}, ctx context.Context) {
+		readyCh := make(chan struct{})
+		var chAlreadyClosed bool
+
+		cancel := Watch(func(actualValues, prevValues []struct{}, ctx context.Context) {
 			countExecutionsWatch++
+			if !chAlreadyClosed {
+				readyCh <- struct{}{}
+			}
 		}, testRef)
-		<-ready
+		<-readyCh
 
 		for i := 0; i < maxExecutions; i++ {
 			if i >= setUntil {
 				cancel()
+				if !chAlreadyClosed {
+					close(readyCh)
+					chAlreadyClosed = true
+				}
 			}
 			testRef.SetValue(struct{}{})
-			<-ready
+			<-readyCh
 		}
 
 		if countExecutionsWatch != setUntil+1 {
